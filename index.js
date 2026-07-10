@@ -87,13 +87,13 @@ Airtouch2.prototype.configureAccessory = function(accessory) {
     accessory.log = this.log;
     accessory.api = this.api;
 
-    if (accessory.displayName.startsWith("AC")) {
+    // Identify cached accessories by their services rather than display-name
+    // prefixes: unit_names/zone_names give accessories arbitrary names, and an
+    // unclaimed cache entry gets re-registered as a duplicate on every restart.
+    if (accessory.getService(Service.Thermostat)) {
         this.setupACAccessory(accessory);
         this.units[accessory.displayName] = accessory;
-    } else if (accessory.displayName.startsWith("Zone") && accessory.displayName.endsWith("Thermostat")) {
-        this.setupThermoAccessory(accessory);
-        this.thermostats[accessory.displayName] = accessory;
-    } else if (accessory.displayName.startsWith("Zone")) {
+    } else if (accessory.getService(Service.Switch)) {
         this.setupZoneAccessory(accessory);
         this.zones[accessory.displayName] = accessory;
     }
