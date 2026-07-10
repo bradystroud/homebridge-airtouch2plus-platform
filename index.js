@@ -13,28 +13,29 @@ module.exports = function (homebridge) {
     FakeGatoHistoryService = require("fakegato-history")(homebridge);
 
     // AC Spill Custom Characteristic
-    CustomCharacteristic.SpillStatus = function() {
-        Characteristic.call(this, "Spill Active", CustomCharacteristic.SpillStatus.UUID);
-        this.setProps({
-            format: Characteristic.Formats.BOOL,
-            perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY],
-        });
-        this.value = this.getDefaultValue();
+    // ES class: Characteristic is a class in modern hap-nodejs and cannot be Function.call'd
+    CustomCharacteristic.SpillStatus = class extends Characteristic {
+        constructor() {
+            super("Spill Active", "154c4ebb-a16f-488b-8968-2e5bbe15809d", {
+                format: "bool",
+                perms: ["pr", "ev"],
+            });
+            this.value = this.getDefaultValue();
+        }
     };
     CustomCharacteristic.SpillStatus.UUID = "154c4ebb-a16f-488b-8968-2e5bbe15809d";
-    util.inherits(CustomCharacteristic.SpillStatus, Characteristic);
 
     // AC Timer Custom Characteristic
-    CustomCharacteristic.TimerStatus = function() {
-        Characteristic.call(this, "Timer Set", CustomCharacteristic.TimerStatus.UUID);
-        this.setProps({
-            format: Characteristic.Formats.BOOL,
-            perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY],
-        });
-        this.value = this.getDefaultValue();
+    CustomCharacteristic.TimerStatus = class extends Characteristic {
+        constructor() {
+            super("Timer Set", "2f9bfcd0-00ff-481a-873c-188a2e93d316", {
+                format: "bool",
+                perms: ["pr", "ev"],
+            });
+            this.value = this.getDefaultValue();
+        }
     };
     CustomCharacteristic.TimerStatus.UUID = "2f9bfcd0-00ff-481a-873c-188a2e93d316";
-    util.inherits(CustomCharacteristic.TimerStatus, Characteristic);
 
     // registerPlatform(pluginName, platformName, constructor, dynamic), dynamic must be true
     homebridge.registerPlatform("homebridge-Airtouch2plus-platform", "Airtouch2", Airtouch2, true);
@@ -103,7 +104,7 @@ Airtouch2.prototype.configureAccessory = function(accessory) {
 // callback for AC messages received from Airtouch2 Touchpad Controller
 Airtouch2.prototype.onACStatusNotification = function(ac_status) {
     ac_status.forEach(unit_status => {
-        unit_name = "AC " + unit_status.ac_unit_number;
+        unit_name = (this.config.unit_names || {})[unit_status.ac_unit_number] || ("AC " + unit_status.ac_unit_number);
         this.log("Received status update for [" + unit_name + "]: " + JSON.stringify(unit_status));
         // check if accessory exists
         if (!(unit_name in this.units)) {
@@ -127,7 +128,7 @@ Airtouch2.prototype.onACStatusNotification = function(ac_status) {
 // callback for Group messages received from Airtouch2 Touchpad Controller
 Airtouch2.prototype.onGroupsStatusNotification = function(groups_status) {
     groups_status.forEach(zone_status => {
-        zone_name = "Zone " + zone_status.group_number;
+        zone_name = (this.config.zone_names || {})[zone_status.group_number] || ("Zone " + zone_status.group_number);
         this.log("Received status update for [" + zone_name + "]: " + JSON.stringify(zone_status));
         // check if accessory exists
         if (!(zone_name in this.zones)) {
@@ -216,13 +217,13 @@ Airtouch2.prototype.setupACAccessory = function(accessory) {
 
     let spillStatus = thermostat.getCharacteristic(CustomCharacteristic.SpillStatus);
     if (spillStatus === undefined)
-        spillStatus = thermostat.addCharacteristic(Characteristic.SpillStatus);
+        spillStatus = thermostat.addCharacteristic(CustomCharacteristic.SpillStatus);
     spillStatus
         .on("get", function(cb){ return cb(null, this.context.spillStatus); }.bind(accessory));
 
     let timerStatus = thermostat.getCharacteristic(CustomCharacteristic.TimerStatus);
     if (timerStatus === undefined)
-        timerStatus = thermostat.addCharacteristic(Characteristic.TimerStatus);
+        timerStatus = thermostat.addCharacteristic(CustomCharacteristic.TimerStatus);
     timerStatus
         .on("get", function(cb){ return cb(null, this.context.timerStatus); }.bind(accessory));
 
