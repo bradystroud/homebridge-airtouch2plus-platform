@@ -159,7 +159,7 @@ Airtouch2.prototype.setupACAccessory = function(accessory) {
     accessory.getService(Service.AccessoryInformation)
         .setCharacteristic(Characteristic.Manufacturer, accessory.context.manufacturer)
         .setCharacteristic(Characteristic.Model, accessory.context.model)
-        .setCharacteristic(Characteristic.SerialNumber, accessory.context.serial.toString());
+        .setCharacteristic(Characteristic.SerialNumber, "AT2-" + accessory.context.serial);
 
     let thermostat = accessory.getService(Service.Thermostat);
     if (thermostat === undefined)
@@ -239,17 +239,29 @@ Airtouch2.prototype.setupACAccessory = function(accessory) {
 Airtouch2.prototype.updateACAccessory = function(accessory, status) {
     let thermostat = accessory.getService(Service.Thermostat);
 
+    // CurrentHeatingCoolingState only allows OFF(0)/HEAT(1)/COOL(2) - AUTO(3) is
+    // valid only for the target state, and an out-of-range value makes iOS show
+    // the accessory as unresponsive.
     if (status.ac_power_state == 0) // OFF
         accessory.context.currentHeatingCoolingState = 0;
-    else if (status.ac_mode == 1) // HEAT
+    else if (status.ac_mode == 1 || status.ac_mode == 8) // HEAT, AUTO-HEAT
         accessory.context.currentHeatingCoolingState = 1;
-    else if (status.ac_mode == 4) // COOL
+    else if (status.ac_mode == 4 || status.ac_mode == 9 || status.ac_mode == 2) // COOL, AUTO-COOL, DRY
         accessory.context.currentHeatingCoolingState = 2;
-    else // AUTO, for: 2=DRY, 3=FAN, 8=AUTO-HEAT, 9=AUTO-COOL
-        accessory.context.currentHeatingCoolingState = 3;
+    else if (status.ac_mode == 3) // FAN shows as idle
+        accessory.context.currentHeatingCoolingState = 0;
+    else // AUTO before the unit picks a direction
+        accessory.context.currentHeatingCoolingState = 1;
     thermostat.setCharacteristic(Characteristic.CurrentHeatingCoolingState, accessory.context.currentHeatingCoolingState);
 
-    accessory.context.targetHeatingCoolingState = accessory.context.currentHeatingCoolingState;
+    if (status.ac_power_state == 0) // OFF
+        accessory.context.targetHeatingCoolingState = 0;
+    else if (status.ac_mode == 1) // HEAT
+        accessory.context.targetHeatingCoolingState = 1;
+    else if (status.ac_mode == 4) // COOL
+        accessory.context.targetHeatingCoolingState = 2;
+    else // AUTO/DRY/FAN/AUTO-HEAT/AUTO-COOL
+        accessory.context.targetHeatingCoolingState = 3;
     thermostat.setCharacteristic(Characteristic.TargetHeatingCoolingState, accessory.context.targetHeatingCoolingState);
 
     accessory.context.currentTemperature = status.ac_temp;
@@ -279,10 +291,10 @@ Airtouch2.prototype.updateACAccessory = function(accessory, status) {
     accessory.context.statusFault = status.ac_error_code;
     thermostat.setCharacteristic(Characteristic.StatusFault, accessory.context.statusFault);
 
-    accessory.context.spillStatus = status.ac_spill;
+    accessory.context.spillStatus = !!status.ac_spill;
     thermostat.setCharacteristic(CustomCharacteristic.SpillStatus, accessory.context.spillStatus);
 
-    accessory.context.timerStatus = status.ac_timer;
+    accessory.context.timerStatus = !!status.ac_timer_set;
     thermostat.setCharacteristic(CustomCharacteristic.TimerStatus, accessory.context.timerStatus);
 
     accessory.updateReachability(true);
@@ -299,7 +311,7 @@ Airtouch2.prototype.setupZoneAccessory = function(accessory) {
     accessory.getService(Service.AccessoryInformation)
         .setCharacteristic(Characteristic.Manufacturer, accessory.context.manufacturer)
         .setCharacteristic(Characteristic.Model, accessory.context.model)
-        .setCharacteristic(Characteristic.SerialNumber, accessory.context.serial.toString());
+        .setCharacteristic(Characteristic.SerialNumber, "AT2-" + accessory.context.serial);
 
     let zone = accessory.getService(Service.Switch);
     if (zone === undefined)
@@ -443,7 +455,7 @@ Airtouch2.prototype.updateZoneAccessory = function(accessory, status) {
 //  accessory.getService(Service.AccessoryInformation)
 //      .setCharacteristic(Characteristic.Manufacturer, accessory.context.manufacturer)
 //      .setCharacteristic(Characteristic.Model, accessory.context.model)
-//      .setCharacteristic(Characteristic.SerialNumber, accessory.context.serial.toString());
+//      .setCharacteristic(Characteristic.SerialNumber, "AT2-" + accessory.context.serial);
 
 //  let thermo = accessory.getService(Service.Thermostat);
 //  if (thermo === undefined)
