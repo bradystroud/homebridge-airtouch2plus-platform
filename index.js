@@ -93,8 +93,20 @@ Airtouch2.prototype.configureAccessory = function(accessory) {
     if (accessory.getService(Service.Thermostat)) {
         this.setupACAccessory(accessory);
         this.units[accessory.displayName] = accessory;
-    } else if (accessory.getService(Service.Switch)) {
-        this.setupZoneAccessory(accessory);
+    } else if (accessory.getService(Service.Switch) || accessory.getService(Service.Fanv2)) {
+        // If the cached accessory doesn't match the configured zone_control
+        // style, drop it so it gets recreated in the right style.
+        let wantFan = this.config.zone_control === "fan";
+        let isFan = accessory.getService(Service.Fanv2) !== undefined;
+        if (wantFan !== isFan) {
+            this.log("[" + accessory.displayName + "] cached with a different zone_control style, recreating...");
+            this.platform.unregisterPlatformAccessories("homebridge-airtouch2plus-platform", "Airtouch2", [accessory]);
+            return;
+        }
+        if (isFan)
+            this.setupZoneFanAccessory(accessory);
+        else
+            this.setupZoneAccessory(accessory);
         this.zones[accessory.displayName] = accessory;
     }
 
@@ -140,7 +152,10 @@ Airtouch2.prototype.onGroupsStatusNotification = function(groups_status) {
             zone.context.manufacturer = "Polyaire";
             zone.context.model = "Quick Fix Damper";
             zone.context.serial = zone_status.group_number;
-            this.setupZoneAccessory(zone);
+            if (this.config.zone_control === "fan")
+                this.setupZoneFanAccessory(zone);
+            else
+                this.setupZoneAccessory(zone);
             this.zones[zone_name] = zone;
             this.platform.registerPlatformAccessories("homebridge-airtouch2plus-platform", "Airtouch2", [zone]);
         }
@@ -301,6 +316,45 @@ Airtouch2.prototype.updateACAccessory = function(accessory, status) {
     this.log("Finished updating accessory [" + accessory.displayName + "]");
 };
 
+// setup Zone accessory as a fan (zone on/off = fan active, damper % = rotation speed)
+Airtouch2.prototype.setupZoneFanAccessory = function(accessory) {
+    accessory.on('identify', (paired, cb) => {
+        this.log(accessory.displayName, " identified");
+        cb();
+    });
+
+    accessory.getService(Service.AccessoryInformation)
+        .setCharacteristic(Characteristic.Manufacturer, accessory.context.manufacturer)
+        .setCharacteristic(Characteristic.Model, accessory.context.model)
+        .setCharacteristic(Characteristic.SerialNumber, "AT2-" + accessory.context.serial);
+
+    let fan = accessory.getService(Service.Fanv2);
+    if (fan === undefined)
+        fan = accessory.addService(Service.Fanv2, accessory.displayName);
+
+    fan
+        .getCharacteristic(Characteristic.Active)
+        .on("get", function(cb){ return cb(null, this.context.active ? 1 : 0); }.bind(accessory))
+        .on("set", this.zoneSetActive.bind(accessory));
+
+    fan
+        .getCharacteristic(Characteristic.RotationSpeed)
+        .setProps({
+            minStep: 5,
+            minValue: 0,
+            maxValue: 100})
+        .on("get", function(cb){ return cb(null, this.context.damperPosition || 0); }.bind(accessory))
+        .on("set", this.zoneSetRotationSpeed.bind(accessory));
+
+    fan
+        .getCharacteristic(Characteristic.Name)
+        .on("get", function(cb){ return cb(null, this.displayName); }.bind(accessory));
+
+    fan.isPrimaryService = true;
+
+    this.log("Finished creating accessory [" + accessory.displayName + "]");
+};
+
 // setup Zone accessory callbacks
 Airtouch2.prototype.setupZoneAccessory = function(accessory) {
     accessory.on('identify', (paired, cb) => {
@@ -377,18 +431,28 @@ Airtouch2.prototype.setupZoneAccessory = function(accessory) {
 
 // update Zone accessory data
 Airtouch2.prototype.updateZoneAccessory = function(accessory, status) {
+    accessory.context.active = status.group_power_state % 2;
+    accessory.context.damperPosition = status.group_damper_position;
+
+    let fan = accessory.getService(Service.Fanv2);
+    if (fan !== undefined) {
+        fan.setCharacteristic(Characteristic.Active, accessory.context.active);
+        fan.setCharacteristic(Characteristic.RotationSpeed, accessory.context.damperPosition);
+        accessory.updateReachability(true);
+        this.log("Finished updating accessory [" + accessory.displayName + "]");
+        return;
+    }
+
     let zone = accessory.getService(Service.Switch);
     let damper = accessory.getService(Service.Window);
 //  let sensor = accessory.getService(Service.TemperatureSensor);
 
-    accessory.context.active = status.group_power_state % 2;
-    zone.setCharacteristic(Characteristic.Active, accessory.context.active);
+    zone.setCharacteristic(Characteristic.On, !!accessory.context.active);
 
     //accessory.context.controlType = status.group_control_type;
     // when using temperature control, set the damper as obstructed
     //damper.setCharacteristic(Characteristic.ObstructionDetected, accessory.context.controlType);
 
-    accessory.context.damperPosition = status.group_damper_position;
     damper.setCharacteristic(Characteristic.CurrentPosition, accessory.context.damperPosition);
     damper.setCharacteristic(Characteristic.TargetPosition, accessory.context.damperPosition);
 
@@ -580,9 +644,18 @@ Airtouch2.prototype.zoneSetActive = function(val, cb) {
 Airtouch2.prototype.zoneSetDamperPosition = function(val, cb) {
     // set damper position
     if (this.context.damperPosition != val) {
-        this.context.damperPositon = val;
+        this.context.damperPosition = val;
         this.api.zoneSetDamperPosition(this.context.serial, val);
-    } 
+    }
+    cb();
+};
+
+Airtouch2.prototype.zoneSetRotationSpeed = function(val, cb) {
+    // fan speed % maps to damper position; 0% is handled by Active, not the damper
+    if (val > 0 && this.context.damperPosition != val) {
+        this.context.damperPosition = val;
+        this.api.zoneSetDamperPosition(this.context.serial, val);
+    }
     cb();
 };
 

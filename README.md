@@ -80,6 +80,10 @@ This fork makes the plugin work on current Homebridge 1.x / hap-nodejs and adds 
 }
 ```
 
+### `zone_control: "fan"`
+
+By default zones are a Switch + Window pair (the Window models the damper, which gives HomeKit's inverted blind-style slider). Set `"zone_control": "fan"` on the platform to expose each zone as a single fan accessory instead: fan on/off = zone on/off, fan speed % = damper opening. One tile per zone, a bottom-up slider, and natural Siri phrases like "set Bed 3 to 60%". Cached accessories migrate automatically on restart.
+
 **Requires Homebridge 1.x** — Homebridge 2.x removed `updateReachability` and other APIs this plugin still uses.
 
 Install:
