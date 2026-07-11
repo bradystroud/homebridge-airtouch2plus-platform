@@ -70,8 +70,12 @@ function Airtouch2(log, config, api) {
         this.api.connect(config.ip_address);
     });
 
-    // connect to the Airtouch2 Touchpad Controller
-    this.api.connect(config.ip_address);
+    // Connect only after homebridge has restored cached accessories -
+    // status messages arriving before configureAccessory() runs would
+    // re-create (duplicate) accessories that are already in the cache.
+    this.platform.on("didFinishLaunching", () => {
+        this.api.connect(config.ip_address);
+    });
 };
 
 // configure cached accessories
