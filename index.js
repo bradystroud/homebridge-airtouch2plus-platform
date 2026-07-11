@@ -248,6 +248,29 @@ Airtouch2.prototype.setupACAccessory = function(accessory) {
 
     thermostat.isPrimaryService = true;
 
+    // Global fan speed as its own fan service: the RotationSpeed characteristic
+    // on the thermostat is nonstandard and the Home app never displays it.
+    // Speed is exposed as N notches (1..fan_speeds.length), not a raw percent.
+    let acfan = accessory.getService(Service.Fanv2);
+    if (acfan === undefined)
+        acfan = accessory.addService(Service.Fanv2, accessory.displayName + " Fan");
+
+    acfan
+        .getCharacteristic(Characteristic.Active)
+        .on("get", function(cb){ return cb(null, this.context.currentHeatingCoolingState != 0 ? 1 : 0); }.bind(accessory))
+        .on("set", this.acFanSetActive.bind(accessory));
+
+    acfan
+        .getCharacteristic(Characteristic.RotationSpeed)
+        .setProps({
+            minStep: 1,
+            minValue: 0,
+            maxValue: accessory.context.fan_speeds.length})
+        .on("get", function(cb){ return cb(null, (this.context.rotationSpeed / this.context.rotation_step) + 1); }.bind(accessory))
+        .on("set", this.acFanSetSpeedLevel.bind(accessory));
+
+    thermostat.addLinkedService(acfan);
+
     accessory.historyService = new FakeGatoHistoryService("thermo", accessory, { storage: "fs" });
     accessory.historyUpdate = 0;
 
@@ -294,6 +317,12 @@ Airtouch2.prototype.updateACAccessory = function(accessory, status) {
     // convert AC fan speed string into homebridge fan rotation % (e.g. High => 99%) using the config array
     accessory.context.rotationSpeed = accessory.context.fan_speeds.indexOf(fan_speed) * accessory.context.rotation_step;
     thermostat.setCharacteristic(Characteristic.RotationSpeed, accessory.context.rotationSpeed);
+
+    let acfan = accessory.getService(Service.Fanv2);
+    if (acfan !== undefined) {
+        acfan.setCharacteristic(Characteristic.Active, accessory.context.currentHeatingCoolingState != 0 ? 1 : 0);
+        acfan.setCharacteristic(Characteristic.RotationSpeed, (accessory.context.rotationSpeed / accessory.context.rotation_step) + 1);
+    }
 
     // save history as Eve Thermo
     let now = new Date().getTime() / 1000;
@@ -618,6 +647,34 @@ Airtouch2.prototype.acSetTargetTemperature = function(val, cb) {
     if (this.context.targetTemperature != val) {
         this.context.targetTemperature = val;
         this.api.acSetTargetTemperature(this.context.serial, val);
+    }
+    cb();
+};
+
+// fan service: active follows/toggles AC power
+Airtouch2.prototype.acFanSetActive = function(val, cb) {
+    let isOn = this.context.currentHeatingCoolingState != 0;
+    if (val == 0 && isOn) {
+        this.context.targetHeatingCoolingState = 0;
+        this.api.acSetCurrentHeatingCoolingState(this.context.serial, 0);
+    } else if (val != 0 && !isOn) {
+        let mode = this.context.targetHeatingCoolingState || 3;
+        if (mode == 0) mode = 3;
+        this.api.acSetCurrentHeatingCoolingState(this.context.serial, mode);
+    }
+    cb();
+};
+
+// fan service: speed notch 1..N maps to the configured fan speed list;
+// 0 accompanies Active=0 and is handled there, not as a damper/speed change
+Airtouch2.prototype.acFanSetSpeedLevel = function(val, cb) {
+    if (val > 0) {
+        let pct = (val - 1) * this.context.rotation_step;
+        if (this.context.rotationSpeed != pct) {
+            this.context.rotationSpeed = pct;
+            let fan_speed = this.context.fan_speeds[val - 1];
+            this.api.acSetFanSpeed(this.context.serial, MAGIC.AT2_AC_FAN_SPEEDS[fan_speed]);
+        }
     }
     cb();
 };
